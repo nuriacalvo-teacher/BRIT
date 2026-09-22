@@ -2,16 +2,11 @@
 
 Aquí van los audios grabados de los ejercicios de Listening.
 
-Se generan de una de estas dos formas:
+Se generan de una de estas formas:
 
-- **Sin instalar nada:** pestaña **Actions** del repositorio → *Grabar los
-  audios de Listening* → **Run workflow**.
-- **Desde tu ordenador:**
-
-  ```bash
-  pip install edge-tts
-  python3 tools/build_audio.py
-  ```
+- **En el Mac:** doble clic en `tools/GRABAR-AUDIOS.command`.
+- **Online:** pestaña **Actions** → *Grabar los audios de Listening* →
+  **Run workflow**.
 
 Contenido después de generarlos:
 

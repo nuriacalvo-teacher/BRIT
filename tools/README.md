@@ -21,59 +21,64 @@ La aplicación puede leer los diálogos de dos maneras:
 
 ## Cómo generar el audio grabado
 
-### Opción A · desde la web de GitHub, sin instalar nada (recomendada)
+### Opción A · en el Mac, con doble clic (la más fiable)
 
-1. Entra en la pestaña **Actions** del repositorio.
-2. En la lista de la izquierda, elige **Grabar los audios de Listening**.
-3. Botón **Run workflow** → **Run workflow**.
+1. Descarga el proyecto: en la página del repositorio, botón verde **Code** →
+   **Download ZIP**. Descomprímelo.
+2. Entra en la carpeta `tools` y haz **doble clic** en
+   **`GRABAR-AUDIOS.command`**.
+3. Se abre una ventana negra y empieza a grabar. Déjala trabajar.
 
-Tarda entre 20 y 40 minutos y puedes cerrar la pestaña: sigue corriendo en los
-servidores de GitHub. Cuando termina, los audios ya están subidos al
-repositorio y la aplicación los usa sola.
+La primera vez puede pedirte instalar las herramientas de desarrollo de macOS:
+acepta, espera, y vuelve a hacer doble clic. Si en vez del ZIP clonaste el
+repositorio con `git`, al terminar sube los audios él solo.
 
-> Si el paso final falla con un error de permisos, entra en
-> **Settings → Actions → General → Workflow permissions** y marca
-> **Read and write permissions**. Es un ajuste que solo hay que tocar una vez.
+> Si macOS dice que *no se puede abrir porque proviene de un desarrollador no
+> identificado*: clic derecho sobre el archivo → **Abrir** → **Abrir**. Solo la
+> primera vez.
 
-### Opción B · desde tu ordenador
+### Opción B · online, sin instalar nada
 
-Hace falta Python 3 y conexión a internet. Desde la carpeta del proyecto:
+1. Pestaña **Actions** del repositorio.
+2. **Grabar los audios de Listening** en la lista de la izquierda.
+3. **Run workflow** → **Run workflow**.
+
+Corre en los servidores de GitHub y sube los audios él solo. Puedes cerrar la
+pestaña. Es la opción más cómoda, pero el servicio de voz rechaza a veces las
+peticiones que vienen de centros de datos; si falla con un error de permisos o
+de conexión, usa la Opción A, que sale desde tu propia red.
+
+> Si falla al subir los audios: **Settings → Actions → General → Workflow
+> permissions → Read and write permissions**. Se toca una sola vez.
+
+### Opción C · a mano, desde el terminal
 
 ```bash
-pip install edge-tts
-python3 tools/build_audio.py
+python3 -m venv .venv-audio
+.venv-audio/bin/pip install edge-tts
+.venv-audio/bin/python tools/build_audio.py
+git add audio && git commit -m "Audios de Listening" && git push
 ```
 
-Deja en `audio/` un `.mp3` por unidad más un `manifest.json`, que hay que subir
-al repositorio (`git add audio && git commit -m "Audios" && git push`).
-
-### En ambos casos
+### En los tres casos
 
 **No hay que tocar `index.html`.** La aplicación busca `audio/manifest.json` al
 arrancar: si existe usa las grabaciones, y si no existe sigue usando la voz del
 navegador.
 
-Son 60 audios, unos 80 minutos de voz y unos 25 MB en total. Si el proceso se
-interrumpe a medias se puede volver a lanzar: continúa por donde iba.
+Son 60 audios, unos 80 minutos de voz y unos 25 MB. Tarda alrededor de media
+hora. Si se interrumpe se puede relanzar: continúa por donde iba.
 
-### Opciones de la línea de órdenes
+### Regrabar una unidad concreta
+
+Si cambias el texto de un diálogo:
 
 ```bash
-python3 tools/build_audio.py --list-voices          # ver las voces británicas disponibles
-python3 tools/build_audio.py --only listening_b1_t1 # regrabar una sola unidad
-python3 tools/build_audio.py --force                # regrabar todo desde cero
+.venv-audio/bin/python tools/build_audio.py --only listening_b2_t14 --force
 ```
 
-En la Opción A esas mismas opciones aparecen como casillas al pulsar
+En la Opción B esas mismas opciones aparecen como casillas al pulsar
 **Run workflow**.
-
-### Si cambias el texto de un diálogo
-
-Regraba solo esa unidad:
-
-```bash
-python3 tools/build_audio.py --only listening_b2_t14 --force
-```
 
 ## Voces
 
