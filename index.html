@@ -5246,19 +5246,64 @@ function timeString() { return Math.floor(taskSeconds / 60) + "m " + (taskSecond
 
 /* =====================================================================
    9 · AUDIO · reproductor de escucha
-   La voz la pone el navegador. Aquí se busca la mejor voz disponible,
-   se lee frase a frase con pausas naturales y se evitan los fallos
-   típicos (Chrome corta a los 15 segundos, Safari carga las voces
-   tarde, algunos motores no avisan cuando terminan).
+   Dos fuentes, en este orden:
+     1. Audio grabado (carpeta /audio). Suena EXACTAMENTE igual en iPhone,
+        Android, Windows, Linux y Mac. Es la opción recomendada para clase.
+        Se genera una sola vez con tools/build_audio.py (ver tools/README.md).
+     2. Si no hay grabación, la voz del propio navegador (Web Speech API).
+        Aquí se elige la mejor voz instalada y se evitan los fallos típicos
+        de cada sistema: Chrome de escritorio corta a los 15 segundos, iOS
+        se estropea si se usa pause/resume o si se toca el tono, Safari
+        publica las voces tarde y algunos motores no avisan al terminar.
    ===================================================================== */
+
+/* ---------- 9.0 · qué dispositivo tenemos delante ---------- */
+var UA_STR = navigator.userAgent || "";
+var IS_IOS = /iPad|iPhone|iPod/.test(UA_STR) ||
+             (/Macintosh/.test(UA_STR) && navigator.maxTouchPoints > 1);   /* iPad en modo escritorio */
+var IS_MAC = /Macintosh/.test(UA_STR) && !IS_IOS;
+var IS_APPLE = IS_IOS || IS_MAC;
+var IS_ANDROID = /Android/.test(UA_STR);
+var IS_LINUX = /Linux|X11|CrOS/.test(UA_STR) && !IS_ANDROID;
+var IS_WINDOWS = /Windows/.test(UA_STR);
+/* El parche de los 15 segundos es de Chrome de ESCRITORIO. En iOS, hacer
+   pause()+resume() en mitad de una frase produce justo el sonido metálico
+   y entrecortado del que se queja el alumnado. */
+var NEEDS_KEEPALIVE = /Chrome|Chromium|Edg\//.test(UA_STR) && !IS_IOS && !IS_ANDROID;
+
 var voicesCache = [];
 var speaking = false;
 var audioQueue = [];
 var audioIndex = 0;
+var audioPct = 0;
 var keepAliveTimer = null;
 var watchdogTimer = null;
 
+/* ---------- 9.1 · audio grabado, si el profesor lo ha generado ---------- */
+var AUDIO_DIR = "audio/";
+var audioManifest = null;      /* null = todavía no se sabe · {} = no hay */
+var audioEl = null;
+
+function loadAudioManifest() {
+  if (audioManifest !== null || !window.fetch) return;
+  audioManifest = {};
+  try {
+    fetch(AUDIO_DIR + "manifest.json", { cache: "no-cache" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.files) { audioManifest = j.files; paintVoicePicker(); } })
+      .catch(function () {});
+  } catch (e) {}
+}
+function recordedFor(task) {
+  if (!task || !audioManifest || !window.Audio) return null;
+  var e = audioManifest[task.id];
+  return (e && e.f) ? e : null;
+}
+function hasRecordedAudio() { return !!recordedFor(currentTask); }
+
+/* ---------- 9.2 · elección de voz ---------- */
 function primeVoices() {
+  loadAudioManifest();
   if (!window.speechSynthesis) return;
   var load = function () {
     voicesCache = window.speechSynthesis.getVoices() || [];
@@ -5269,29 +5314,65 @@ function primeVoices() {
   /* Safari e iOS tardan en publicar la lista */
   setTimeout(load, 400);
   setTimeout(load, 1500);
+  setTimeout(load, 3000);
 }
 function allVoices() {
   var v = [];
   try { v = (window.speechSynthesis && window.speechSynthesis.getVoices()) || []; } catch (e) {}
   return (v && v.length) ? v : (voicesCache || []);
 }
-/* Puntuación: primero la calidad del motor, después el acento */
+/* Dos voces pueden llamarse igual ("Daniel" compacta y "Daniel" mejorada),
+   así que se identifican por voiceURI, no por nombre. */
+function voiceKey(v) { return (v && (v.voiceURI || (v.name + "|" + v.lang))) || ""; }
+
+/* Voces de broma de macOS/iOS: suenan a robot de dibujos animados */
+var NOVELTY_VOICE = /\b(bad news|good news|bahh|bells|boing|bubbles|cellos|deranged|jester|organ|princess|trinoids|whisper|zarvox|wobble|superstar|hysterical|albert|junior|kathy|ralph|rocko|shelley|grandma|grandpa|eddy|flo|sandy|reed|fred)\b/i;
+
+/* Nivel de calidad del motor. Es lo que de verdad decide si suena a
+   persona o a lata: premium/mejorada/neural frente a compacta. */
+function voiceQuality(v) {
+  var both = (v.name || "") + " " + (v.voiceURI || "");
+  if (/premium|siri_|\bsiri\b/i.test(both)) return 3;          /* lo mejor de Apple */
+  if (/enhanced|neural|natural|wavenet|studio|journey/i.test(both)) return 3;
+  if (/\bcompact\b|\.compact\.|-compact|eloquence|espeak|pico|festival|flite|mbrola/i.test(both)) return 0;
+  return 2;
+}
+function qualityLabel(v) {
+  if (NOVELTY_VOICE.test(v.name || "")) return "de broma";
+  var q = voiceQuality(v);
+  return q === 3 ? "alta" : (q === 0 ? "baja" : "normal");
+}
 function voiceScore(v) {
-  var n = (v.name || "") + " " + (v.voiceURI || "");
+  var name = v.name || "";
+  var both = name + " " + (v.voiceURI || "");
   var lang = (v.lang || "").replace("_", "-");
   var s = 0;
-  if (/natural|neural|premium|enhanced|siri|wavenet|studio/i.test(n)) s += 60;
-  if (/google/i.test(n)) s += 45;
-  if (/microsoft/i.test(n)) s += 30;
-  if (/libby|sonia|ryan|thomas|hazel|george|maisie|abbi|bella|olivia/i.test(n)) s += 25;
-  if (/daniel|serena|kate|oliver|stephanie|arthur|martha/i.test(n)) s += 20;
-  if (/compact|eloquence|espeak|pico/i.test(n)) s -= 40;
-  if (/^en-GB/i.test(lang)) s += 40;
-  else if (/^en-(IE|AU|NZ)/i.test(lang)) s += 25;
-  else if (/^en-US/i.test(lang)) s += 18;
+
+  /* 1 · calidad del motor (lo que más se nota) */
+  var q = voiceQuality(v);
+  s += (q === 3 ? 90 : q === 0 ? -70 : 0);
+  if (NOVELTY_VOICE.test(name)) s -= 300;
+
+  /* 2 · fabricante */
+  if (/google/i.test(both)) s += 40;
+  else if (/microsoft/i.test(both)) s += 28;
+  else if (/apple|com\.apple/i.test(both)) s += 20;
+
+  /* 3 · acento: el examen es de inglés británico */
+  if (/^en-GB/i.test(lang)) s += 45;
+  else if (/^en-(IE|AU|NZ|ZA)/i.test(lang)) s += 26;
+  else if (/^en-US/i.test(lang)) s += 20;
   else if (/^en/i.test(lang)) s += 10;
-  else s -= 100;
-  if (v.localService) s += 5;
+  else s -= 1000;
+
+  /* 4 · voces concretas que se sabe que suenan bien */
+  if (/libby|sonia|ryan|thomas|maisie|abbi|bella|olivia|aria|jenny|guy|hazel/i.test(name)) s += 14;
+  if (/daniel|serena|kate|oliver|stephanie|arthur|martha|karen|moira|alex\b/i.test(name)) s += 10;
+
+  /* 5 · las "Online (Natural)" de Microsoft son excelentes pero necesitan red */
+  if (/online/i.test(both) && navigator.onLine === false) s -= 200;
+
+  if (v.localService) s += 3;
   return s;
 }
 function englishVoices() {
@@ -5299,51 +5380,110 @@ function englishVoices() {
     .filter(function (v) { return /^en/i.test((v.lang || "").replace("_", "-")); })
     .sort(function (a, b) { return voiceScore(b) - voiceScore(a); });
 }
-function storedVoiceName() { return storageGet("cova_voice") || ""; }
+function storedVoiceKey() { return storageGet("cova_voice") || ""; }
 function storedRate() { return parseFloat(storageGet("cova_rate") || "0") || 0; }
 
-/* Las dos voces que se usarán: la mejor y otra distinta para el segundo
-   interlocutor (si el dispositivo tiene más de una). */
+/* Las dos voces del diálogo: la mejor, y otra distinta para el segundo
+   interlocutor (si el dispositivo tiene más de una voz decente). */
 function chosenVoices() {
   var list = englishVoices();
   if (!list.length) return [];
-  var first = list.find(function (v) { return v.name === storedVoiceName(); }) || list[0];
-  var second = list.find(function (v) {
-    if (v.name === first.name) return false;
-    var f = /female|woman|libby|sonia|hazel|serena|kate|maisie|abbi|martha|zira|aria/i.test(first.name);
-    var g = /female|woman|libby|sonia|hazel|serena|kate|maisie|abbi|martha|zira|aria/i.test(v.name);
-    return f !== g;                      /* mejor si son de distinto timbre */
-  }) || list[1] || first;
-  return [first, second];
+  var want = storedVoiceKey();
+  var first = null;
+  if (want) {
+    for (var i = 0; i < list.length; i++) { if (voiceKey(list[i]) === want) { first = list[i]; break; } }
+  }
+  if (!first) first = list[0];
+  var femaleRe = /female|woman|libby|sonia|hazel|serena|kate|maisie|abbi|martha|zira|aria|jenny|karen|moira|samantha|fiona|tessa|catherine|eva|susan/i;
+  var f = femaleRe.test(first.name || "");
+  var second = null;
+  for (var j = 0; j < list.length; j++) {
+    var v = list[j];
+    if (voiceKey(v) === voiceKey(first)) continue;
+    if (voiceQuality(v) < voiceQuality(first)) continue;      /* nunca bajar de calidad */
+    if (femaleRe.test(v.name || "") !== f) { second = v; break; }
+  }
+  if (!second) {
+    for (var k = 0; k < list.length; k++) {
+      if (voiceKey(list[k]) !== voiceKey(first) && voiceQuality(list[k]) >= voiceQuality(first)) { second = list[k]; break; }
+    }
+  }
+  return [first, second || first];
 }
-function audioAvailable() { return !!window.speechSynthesis; }
+function audioAvailable() { return !!window.speechSynthesis || hasRecordedAudio(); }
+
+/* ---------- 9.3 · avisos según el dispositivo ---------- */
+function deviceVoiceTip() {
+  if (IS_IOS) {
+    return "En iPhone y iPad la voz que viene de fábrica es la <strong>compacta</strong>, y suena metálica. " +
+           "Se arregla en un minuto y para siempre: <strong>Ajustes → Accesibilidad → Contenido hablado → Voces → Inglés</strong>, " +
+           "elige por ejemplo <em>Daniel (Reino Unido)</em> y descarga la versión <strong>Mejorada</strong> o <strong>Premium</strong>. " +
+           "Después vuelve aquí, recarga la página y selecciónala en la lista de arriba.";
+  }
+  if (IS_ANDROID) {
+    return "En Android: <strong>Ajustes → Accesibilidad → Texto a voz</strong>. Usa el motor de <strong>Google</strong> " +
+           "e instala los datos de voz de inglés (Reino Unido). Con Chrome se oye mejor que con otros navegadores.";
+  }
+  if (IS_WINDOWS) {
+    return "En Windows: <strong>Configuración → Hora e idioma → Voz → Agregar voces</strong> e instala una voz de " +
+           "<strong>English (United Kingdom)</strong>. Con <strong>Microsoft Edge</strong> aparecen además las voces " +
+           "“Online (Natural)”, que son las que mejor suenan.";
+  }
+  if (IS_LINUX) {
+    return "En Linux (Vitalinux) los navegadores no traen voces de serie y las que se instalan suenan a robot. " +
+           "Para clase lo recomendable es usar los <strong>audios grabados</strong>: pídeselos al profesor " +
+           "(se generan con <code>tools/build_audio.py</code> y se copian a la carpeta <code>audio/</code>).";
+  }
+  return "Si la voz no te convence, prueba otra de la lista: cada dispositivo trae voces distintas.";
+}
 function voiceQualityWarning() {
+  if (hasRecordedAudio()) return "";                 /* audio grabado: suena igual en todos lados */
+  if (!window.speechSynthesis) return "Este navegador no puede generar voz. Lee la transcripción para no perder la práctica.";
   var list = englishVoices();
-  if (!list.length) return "Tu navegador no tiene ninguna voz en inglés instalada. Puedes leer la transcripción para no perder la práctica.";
-  if (voiceScore(list[0]) < 30) return "La voz de este dispositivo es de calidad baja. Se oye mucho mejor en Chrome o en Edge, o instalando una voz de inglés en los ajustes del sistema.";
+  if (!list.length) {
+    return "Este dispositivo no tiene ninguna voz en inglés instalada. " + deviceVoiceTip();
+  }
+  if (voiceQuality(list[0]) < 2) {
+    return "La única voz de inglés de este dispositivo es de <strong>calidad baja</strong> (por eso suena a robot enlatado). " + deviceVoiceTip();
+  }
+  if (voiceQuality(list[0]) < 3) {
+    return "Se puede oír bastante mejor. " + deviceVoiceTip();
+  }
   return "";
 }
 
-/* ---------- troceado en frases, con pausas ---------- */
+/* ---------- 9.4 · troceado en frases, con pausas ---------- */
+/* Trozos de ~180 caracteres: pocos suficientes para que Chrome no corte a
+   los 15 s, y bastante largos para que iOS no meta un "clic" en cada frase. */
 function speechChunks(task) {
+  var MAXLEN = 180;
   var out = [];
-  (task.lines || []).forEach(function (line, li) {
+  var lines = task.lines || [];
+  lines.forEach(function (line, li) {
     var parts = sentencesOf(line.t);
     if (!parts.length) parts = [line.t];
-    parts.forEach(function (s, si) {
+    var buf = "";
+    var push = function (isLast) {
+      if (!buf) return;
       out.push({
-        text: s,
+        text: buf,
         sp: line.sp,
         v: line.v || 0,
-        /* pausa mayor al cambiar de interlocutor o de párrafo */
-        pause: (si === parts.length - 1) ? (li < (task.lines.length - 1) ? 520 : 0) : 230,
-        newSpeaker: si === 0 && (li === 0 || task.lines[li - 1].sp !== line.sp)
+        /* pausa larga al cambiar de interlocutor, corta dentro del turno */
+        pause: isLast ? (li < lines.length - 1 ? 620 : 0) : 170
       });
+      buf = "";
+    };
+    parts.forEach(function (s, i) {
+      if (buf && (buf.length + s.length + 1) > MAXLEN) push(false);
+      buf = buf ? (buf + " " + s) : s;
+      if (i === parts.length - 1) push(true);
     });
   });
   return out;
 }
 
+/* ---------- 9.5 · interfaz ---------- */
 function updateAudioUI(state) {
   var btn = document.getElementById("playBtn");
   var wave = document.getElementById("waveBox");
@@ -5360,10 +5500,11 @@ function updateAudioUI(state) {
         : '<i class="fa-solid fa-check mr-2"></i> No plays left');
   }
   if (wave) wave.classList.toggle("hidden", state !== "playing");
-  if (bar) bar.style.width = (audioQueue.length ? Math.round(audioIndex / audioQueue.length * 100) : 0) + "%";
+  if (bar) bar.style.width = Math.max(0, Math.min(100, Math.round(audioPct))) + "%";
   if (who) {
-    if (state === "playing" && audioQueue[audioIndex]) { who.classList.remove("hidden"); who.innerText = audioQueue[audioIndex].sp; }
-    else who.classList.add("hidden");
+    if (state === "playing" && audioQueue[audioIndex] && audioQueue[audioIndex].sp) {
+      who.classList.remove("hidden"); who.innerText = audioQueue[audioIndex].sp;
+    } else who.classList.add("hidden");
   }
   if (left && state !== "playing") {
     left.innerText = playsLeft > 0
@@ -5379,22 +5520,85 @@ function stopAudio() {
   speaking = false;
   clearTimers();
   try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
-  audioQueue = []; audioIndex = 0;
+  if (audioEl) {
+    try { audioEl.pause(); audioEl.onerror = null; audioEl.onended = null; audioEl.ontimeupdate = null; audioEl.removeAttribute("src"); audioEl.load(); } catch (e) {}
+    audioEl = null;
+  }
+  audioQueue = []; audioIndex = 0; audioPct = 0;
   updateAudioUI("idle");
 }
-function currentRate(task) {
-  var r = storedRate();
-  return r || (task && task.rate) || 0.95;
-}
+/* En iPhone/iPad las voces compactas se deforman al cambiar la velocidad o
+   el tono, así que allí se parte de 1.0 y no se toca el tono nunca. */
+function defaultRate(task) { return IS_APPLE ? 1 : ((task && task.rate) || 0.95); }
+function currentRate(task) { return storedRate() || defaultRate(task); }
+
 function playAudio() {
-  if (!audioAvailable() || speaking || playsLeft <= 0 || !currentTask) return;
+  if (speaking || playsLeft <= 0 || !currentTask) return;
+  warmUpSpeech();                              /* iOS: debe salir del gesto del usuario */
+  var rec = recordedFor(currentTask);
+  if (rec) playRecorded(rec);
+  else playSynth();
+}
+
+/* ---------- 9.6 · reproducción del audio grabado ---------- */
+function playRecorded(rec) {
+  playsLeft--;
+  speaking = true;
+  audioIndex = 0; audioPct = 0;
+  audioQueue = (rec.cues && rec.cues.length) ? rec.cues : speechChunks(currentTask);
+  updateAudioUI("playing");
+
+  var el = new Audio(AUDIO_DIR + rec.f);
+  audioEl = el;
+  el.preload = "auto";
+  /* sin esto, bajar la velocidad convierte la voz en un robot grave */
+  try { el.preservesPitch = true; el.mozPreservesPitch = true; el.webkitPreservesPitch = true; } catch (e) {}
+  el.playbackRate = Math.max(0.6, Math.min(1.5, currentRate(currentTask)));
+
+  var failed = function () {
+    if (!speaking || audioEl !== el) return;
+    speaking = false; audioEl = null;
+    playsLeft++;                               /* el fallo no gasta escucha */
+    playSynth();                               /* se recurre a la voz del navegador */
+  };
+  el.onerror = failed;
+  el.onended = function () {
+    if (audioEl !== el) return;
+    speaking = false; audioEl = null;
+    audioPct = 100; audioIndex = Math.max(0, audioQueue.length - 1);
+    updateAudioUI("idle");
+  };
+  el.ontimeupdate = function () {
+    if (audioEl !== el) return;
+    var d = el.duration || rec.d || 0;
+    audioPct = d ? (el.currentTime / d) * 100 : 0;
+    if (rec.cues && rec.cues.length) {
+      var i = 0;
+      while (i + 1 < rec.cues.length && rec.cues[i + 1].t <= el.currentTime) i++;
+      audioIndex = i;
+    }
+    updateAudioUI("playing");
+  };
+  var p;
+  try { p = el.play(); } catch (e) { failed(); return; }
+  if (p && p.catch) p.catch(failed);
+}
+
+/* ---------- 9.7 · reproducción con la voz del navegador ---------- */
+function playSynth() {
+  if (!window.speechSynthesis || !currentTask) { audioFailed(); return; }
   var synth = window.speechSynthesis;
   try { synth.cancel(); } catch (e) {}
   playsLeft--;
   speaking = true;
   audioQueue = speechChunks(currentTask);
-  audioIndex = 0;
+  audioIndex = 0; audioPct = 0;
   var voices = chosenVoices();
+  /* si las dos voces acaban siendo la misma, se separa un poco el tono
+     para distinguir a los interlocutores — pero nunca en Apple, donde el
+     cambio de tono es justo lo que produce el sonido de lata */
+  var sameVoice = voices.length < 2 || voiceKey(voices[0]) === voiceKey(voices[1]);
+  var usePitch = sameVoice && !IS_APPLE;
   var rate = currentRate(currentTask);
   var startedAt = Date.now();
   var errorCount = 0;
@@ -5403,18 +5607,22 @@ function playAudio() {
   }, 0);
   updateAudioUI("playing");
 
-  /* Chrome deja de hablar a los ~15 s si no se le "despierta" */
   clearTimers();
-  keepAliveTimer = setInterval(function () {
-    if (!speaking) return;
-    try { if (synth.speaking && !synth.paused) { synth.pause(); synth.resume(); } } catch (e) {}
-  }, 9000);
+  /* Chrome de escritorio deja de hablar a los ~15 s si no se le despierta.
+     En iOS este mismo truco parte las frases: por eso va condicionado. */
+  if (NEEDS_KEEPALIVE) {
+    keepAliveTimer = setInterval(function () {
+      if (!speaking) return;
+      try { if (synth.speaking && !synth.paused) { synth.pause(); synth.resume(); } } catch (e) {}
+    }, 9000);
+  }
 
   function finish() {
     speaking = false;
     clearTimers();
-    audioIndex = audioQueue.length;
-    /* Si el motor de voz no ha sonado (sin voces instaladas, permisos, etc.)
+    audioIndex = Math.max(0, audioQueue.length - 1);
+    audioPct = 100;
+    /* Si el motor no ha llegado a sonar (sin voces, sin permiso, etc.)
        no se pierde la escucha y se ofrece la transcripción. */
     var tooFast = (Date.now() - startedAt) < expectedMs * 0.35;
     if (errorCount >= Math.ceil(audioQueue.length / 2) || tooFast) { audioFailed(); return; }
@@ -5424,12 +5632,16 @@ function playAudio() {
     if (!speaking) return;
     if (audioIndex >= audioQueue.length) { finish(); return; }
     var chunk = audioQueue[audioIndex];
+    audioPct = (audioIndex / audioQueue.length) * 100;
     updateAudioUI("playing");
     var u = new SpeechSynthesisUtterance(chunk.text);
     var v = voices.length ? (voices[chunk.v] || voices[0]) : null;
-    if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "en-GB"; }
-    u.rate = rate * (chunk.v === 1 ? 0.99 : 1);
-    u.pitch = chunk.v === 1 ? 1.06 : 0.98;   /* diferencia leve, no de dibujos animados */
+    /* si el motor rechaza la voz, se sigue con la de por defecto antes que
+       dejar al alumno sin audio */
+    try { if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "en-GB"; } }
+    catch (e) { u.lang = "en-GB"; }
+    u.rate = rate;
+    u.pitch = usePitch && chunk.v === 1 ? 1.12 : 1;
     u.volume = 1;
     var done = false;
     var advance = function () {
@@ -5443,7 +5655,6 @@ function playAudio() {
     u.onend = advance;
     u.onerror = function () {
       errorCount++;
-      /* si falla desde el principio, no hacemos esperar al alumno */
       if (errorCount >= 3 && audioIndex <= 4) { speaking = false; clearTimers(); audioFailed(); return; }
       advance();
     };
@@ -5455,17 +5666,20 @@ function playAudio() {
     }, expected);
     try { synth.speak(u); } catch (e) { advance(); }
   }
-  speakNext();
+  /* iOS necesita un respiro entre cancel() y speak(), o se traga la primera frase */
+  if (IS_IOS) setTimeout(speakNext, 180); else speakNext();
 }
+
 function audioFailed() {
   playsLeft++;                                   /* no se descuenta la escucha */
+  speaking = false;
+  clearTimers();
   updateAudioUI("idle");
   var box = document.getElementById("audioFailBox");
   if (box) {
     box.classList.remove("hidden");
     box.innerHTML = '<p class="font-bold text-amber-200 mb-2"><i class="fa-solid fa-triangle-exclamation"></i> El audio no ha sonado en este dispositivo.</p>' +
-      '<p class="text-sm text-amber-100/90">No te hemos descontado la escucha. Prueba a elegir otra voz en <strong>Ajustes de voz</strong>, súbele el volumen, o usa Chrome o Edge. ' +
-      'Si aun así no suena, puedes hacer el ejercicio leyendo la transcripción.</p>' +
+      '<p class="text-sm text-amber-100/90">No te hemos descontado la escucha. ' + deviceVoiceTip() + '</p>' +
       '<button type="button" onclick="revealTranscript()" class="mt-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-5 py-2 rounded-xl text-sm">' +
       '<i class="fa-solid fa-file-lines mr-2"></i>Leer la transcripción</button>';
   }
@@ -5481,7 +5695,7 @@ function revealTranscript() {
 
 /* iOS y Safari exigen que la primera voz salga de un gesto del usuario */
 function warmUpSpeech() {
-  if (!audioAvailable() || window.__speechWarm) return;
+  if (!window.speechSynthesis || window.__speechWarm) return;
   window.__speechWarm = true;
   try {
     var u = new SpeechSynthesisUtterance(" ");
@@ -5489,34 +5703,76 @@ function warmUpSpeech() {
     window.speechSynthesis.speak(u);
   } catch (e) {}
 }
-function setVoice(name) {
-  storageSet("cova_voice", name || "");
+function setVoice(key) {
+  storageSet("cova_voice", key || "");
   if (speaking) stopAudio();
+  paintVoicePicker();
 }
 function setRate(r) {
   storageSet("cova_rate", String(r));
   if (speaking) stopAudio();
 }
+/* Prueba de voz: no gasta ninguna de las dos escuchas del examen */
+function testVoice() {
+  if (!window.speechSynthesis) return;
+  if (speaking) stopAudio();
+  try { window.speechSynthesis.cancel(); } catch (e) {}
+  var v = chosenVoices()[0];
+  var u = new SpeechSynthesisUtterance("Hello. This is how the listening exercises will sound on this device.");
+  try { if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "en-GB"; } }
+  catch (e) { u.lang = "en-GB"; }
+  u.rate = currentRate(currentTask); u.pitch = 1; u.volume = 1;
+  if (IS_IOS) setTimeout(function () { window.speechSynthesis.speak(u); }, 180);
+  else window.speechSynthesis.speak(u);
+}
 function paintVoicePicker() {
   var sel = document.getElementById("voiceSelect");
-  if (!sel) return;
-  var list = englishVoices();
-  var chosen = storedVoiceName() || (list[0] && list[0].name) || "";
-  sel.innerHTML = list.map(function (v) {
-    var tag = /^en-GB/i.test((v.lang || "").replace("_", "-")) ? "🇬🇧" : (/^en-US/i.test(v.lang) ? "🇺🇸" : "🌍");
-    return '<option value="' + escapeHtml(v.name) + '"' + (v.name === chosen ? " selected" : "") + '>' +
-      tag + " " + escapeHtml(v.name.replace(/^(Microsoft|Google)\s+/i, "")) + "</option>";
-  }).join("");
   var warn = document.getElementById("voiceWarning");
+  var src = document.getElementById("audioSourceLine");
+  var rec = recordedFor(currentTask);
+
+  if (src) {
+    src.innerHTML = rec
+      ? '<i class="fa-solid fa-headphones text-emerald-400"></i> Audio grabado: suena igual en cualquier móvil, tablet u ordenador.'
+      : '<i class="fa-solid fa-microphone-lines text-slate-500"></i> Audio generado por la voz de este dispositivo.';
+  }
+  /* con audio grabado el selector de voz no pinta nada */
+  var voiceBox = document.getElementById("voiceBox");
+  if (voiceBox) voiceBox.classList.toggle("hidden", !!rec);
+
+  if (sel) {
+    var list = englishVoices();
+    var chosen = storedVoiceKey() || (list[0] && voiceKey(list[0])) || "";
+    sel.innerHTML = list.length
+      ? list.map(function (v) {
+          var lang = (v.lang || "").replace("_", "-");
+          var tag = /^en-GB/i.test(lang) ? "🇬🇧" : (/^en-US/i.test(lang) ? "🇺🇸" : "🌍");
+          var label = v.name.replace(/^(Microsoft|Google)\s+/i, "");
+          return '<option value="' + escapeHtml(voiceKey(v)) + '"' + (voiceKey(v) === chosen ? " selected" : "") + '>' +
+            tag + " " + escapeHtml(label) + " · calidad " + qualityLabel(v) + "</option>";
+        }).join("")
+      : '<option value="">(este dispositivo no tiene voces en inglés)</option>';
+  }
   if (warn) {
     var msg = voiceQualityWarning();
-    warn.innerHTML = msg ? '<i class="fa-solid fa-circle-info"></i> ' + msg : "";
+    warn.innerHTML = msg ? '<i class="fa-solid fa-circle-info mr-1"></i> ' + msg : "";
     warn.classList.toggle("hidden", !msg);
+  }
+  /* aviso grande fuera de los "Ajustes": si la voz es mala hay que verlo sin abrir nada */
+  var notice = document.getElementById("audioNotice");
+  if (notice) {
+    var bad = !rec && window.speechSynthesis && (function () {
+      var l = englishVoices();
+      return !l.length || voiceQuality(l[0]) < 2;
+    })();
+    notice.classList.toggle("hidden", !bad);
+    if (bad) notice.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-1"></i> ' + voiceQualityWarning();
   }
 }
 function audioPlayerHtml() {
-  var rate = storedRate() || 0.95;
+  var rate = storedRate() || defaultRate(currentTask);
   return '<div class="bg-slate-950 border-2 border-emerald-500/30 rounded-3xl p-5 md:p-6 space-y-4">' +
+    '<div id="audioNotice" class="hidden bg-amber-950/40 border-2 border-amber-500/40 rounded-2xl p-4 text-sm text-amber-100"></div>' +
     '<div class="flex flex-col md:flex-row items-center gap-4">' +
       '<button id="playBtn" onclick="playAudio()" class="w-full md:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black text-lg px-8 py-4 rounded-2xl transition shadow-lg shadow-emerald-600/30">' +
         '<i class="fa-solid fa-play mr-2"></i> Play (' + playsLeft + ')</button>' +
@@ -5526,22 +5782,25 @@ function audioPlayerHtml() {
       '<p id="playsLeftLine" class="text-sm text-slate-400 font-bold md:ml-auto">Puedes escucharlo ' + playsLeft + ' veces. Lee las preguntas antes.</p>' +
     '</div>' +
     '<div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden"><div id="audioBar" class="bg-emerald-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div></div>' +
+    '<p id="audioSourceLine" class="text-xs text-slate-500"></p>' +
     '<div id="audioFailBox" class="hidden bg-amber-950/40 border-2 border-amber-500/40 rounded-2xl p-4"></div>' +
     '<details class="border-t border-slate-800 pt-3">' +
       '<summary class="cursor-pointer text-sm font-bold text-slate-400"><i class="fa-solid fa-sliders mr-2"></i>Ajustes de voz (si no se oye bien)</summary>' +
       '<div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">' +
-        '<div><label class="block text-xs font-black uppercase text-slate-500 mb-1">Voz</label>' +
-          '<select id="voiceSelect" onchange="setVoice(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"></select></div>' +
+        '<div id="voiceBox"><label class="block text-xs font-black uppercase text-slate-500 mb-1">Voz</label>' +
+          '<select id="voiceSelect" onchange="setVoice(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"></select>' +
+          '<button type="button" onclick="testVoice()" class="mt-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3 py-2 rounded-xl text-sm">' +
+            '<i class="fa-solid fa-volume-high mr-2"></i>Probar esta voz (no gasta escuchas)</button></div>' +
         '<div><label class="block text-xs font-black uppercase text-slate-500 mb-1">Velocidad</label>' +
           '<div class="flex gap-2">' +
-            [["0.8", "Lenta"], ["0.95", "Normal"], ["1.1", "Rápida"]].map(function (o) {
+            [["0.85", "Lenta"], ["1", "Normal"], ["1.15", "Rápida"]].map(function (o) {
               return '<button type="button" onclick="setRate(' + o[0] + ');markRate(this)" data-rate="' + o[0] + '" class="rate-btn flex-1 px-3 py-2 rounded-xl border text-sm font-bold ' +
-                (Math.abs(rate - parseFloat(o[0])) < 0.02 ? "border-emerald-500 text-emerald-300 bg-emerald-500/10" : "border-slate-700 text-slate-300 bg-slate-900") + '">' + o[1] + "</button>";
+                (Math.abs(rate - parseFloat(o[0])) < 0.06 ? "border-emerald-500 text-emerald-300 bg-emerald-500/10" : "border-slate-700 text-slate-300 bg-slate-900") + '">' + o[1] + "</button>";
             }).join("") +
           '</div></div>' +
       '</div>' +
-      '<p id="voiceWarning" class="hidden text-xs text-amber-300 mt-3"></p>' +
-      '<p class="text-xs text-slate-500 mt-2">Se oye mejor con auriculares. Si la voz suena metálica, prueba otra de la lista: cada dispositivo trae voces distintas.</p>' +
+      '<p id="voiceWarning" class="hidden text-xs text-amber-300 mt-3 leading-relaxed"></p>' +
+      '<p class="text-xs text-slate-500 mt-2">Se oye mejor con auriculares.</p>' +
     '</details></div>';
 }
 function markRate(btn) {
@@ -6109,7 +6368,9 @@ function findSpelling(text) {
 var ABBREV_RE = /\b(a\.m|p\.m|e\.g|i\.e|etc|mr|mrs|ms|dr|prof|st|no|vs|approx|fig)\./gi;
 function sentencesOf(text) {
   var safe = (text || "").replace(/\n+/g, " ").replace(ABBREV_RE, function (m) { return m.replace(/\./g, "\u0001"); });
-  return safe.split(/(?<=[.!?])\s+/)
+  /* sin lookbehind: iOS/Safari anteriores a 16.4 no lo entienden y rompen
+     todo el bloque de script, dejando la página en blanco */
+  return safe.replace(/([.!?])\s+/g, "$1\u0002").split("\u0002")
     .map(function (s) { return s.replace(/\u0001/g, ".").trim(); })
     .filter(function (s) { return s.length > 1; });
 }
