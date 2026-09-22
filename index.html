@@ -5335,7 +5335,8 @@ function voiceQuality(v) {
   if (/premium|siri_|\bsiri\b/i.test(both)) return 3;          /* lo mejor de Apple */
   if (/enhanced|neural|natural|wavenet|studio|journey/i.test(both)) return 3;
   if (/\bcompact\b|\.compact\.|-compact|eloquence|espeak|pico|festival|flite|mbrola/i.test(both)) return 0;
-  return 2;
+  if (/google/i.test(both)) return 3;                          /* las de Google suenan bien */
+  return 2;                                                     /* correcta, pero mejorable */
 }
 function qualityLabel(v) {
   if (NOVELTY_VOICE.test(v.name || "")) return "de broma";
@@ -5376,8 +5377,12 @@ function voiceScore(v) {
   return s;
 }
 function englishVoices() {
-  return allVoices()
-    .filter(function (v) { return /^en/i.test((v.lang || "").replace("_", "-")); })
+  var all = allVoices().filter(function (v) { return /^en/i.test((v.lang || "").replace("_", "-")); });
+  /* macOS y iOS traen de serie un montón de voces de broma (Zarvox, Bubbles,
+     Bad News...). No se ocultan por gusto: llenan la lista y hacen creer que
+     el dispositivo no tiene nada decente. Solo se muestran si no hay otra. */
+  var usable = all.filter(function (v) { return !NOVELTY_VOICE.test(v.name || ""); });
+  return (usable.length ? usable : all)
     .sort(function (a, b) { return voiceScore(b) - voiceScore(a); });
 }
 function storedVoiceKey() { return storageGet("cova_voice") || ""; }
@@ -5419,6 +5424,15 @@ function deviceVoiceTip() {
            "Se arregla en un minuto y para siempre: <strong>Ajustes → Accesibilidad → Contenido hablado → Voces → Inglés</strong>, " +
            "elige por ejemplo <em>Daniel (Reino Unido)</em> y descarga la versión <strong>Mejorada</strong> o <strong>Premium</strong>. " +
            "Después vuelve aquí, recarga la página y selecciónala en la lista de arriba.";
+  }
+  if (IS_MAC) {
+    return "En Mac, Safari solo puede usar las voces de Apple, y las que vienen instaladas de fábrica son las " +
+           "<strong>compactas</strong>, que suenan a lata. Descarga una buena una sola vez: " +
+           "<strong>Ajustes del Sistema → Accesibilidad → Contenido hablado → Voz del sistema → Gestionar voces…</strong>, " +
+           "despliega <strong>Inglés (Reino Unido)</strong> y descarga <em>Daniel</em> o <em>Martha</em> en versión " +
+           "<strong>Mejorada</strong> o <strong>Premium</strong>. Ocupan bastante y tardan un rato en bajar. " +
+           "Después recarga esta página y elígela en la lista de arriba. " +
+           "(En Chrome no hace falta: ahí salen además las voces de Google, que ya suenan bien.)";
   }
   if (IS_ANDROID) {
     return "En Android: <strong>Ajustes → Accesibilidad → Texto a voz</strong>. Usa el motor de <strong>Google</strong> " +
@@ -5598,7 +5612,11 @@ function playSynth() {
      para distinguir a los interlocutores — pero nunca en Apple, donde el
      cambio de tono es justo lo que produce el sonido de lata */
   var sameVoice = voices.length < 2 || voiceKey(voices[0]) === voiceKey(voices[1]);
-  var usePitch = sameVoice && !IS_APPLE;
+  /* Tocar el tono estropea las voces de Apple: era la causa del sonido de
+     lata en iPhone. Solo se hace cuando no queda otra, es decir, cuando el
+     dispositivo tiene una sola voz decente y sin esa diferencia los dos
+     interlocutores del diálogo serían indistinguibles. */
+  var usePitch = sameVoice;
   var rate = currentRate(currentTask);
   var startedAt = Date.now();
   var errorCount = 0;
@@ -5641,7 +5659,7 @@ function playSynth() {
     try { if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "en-GB"; } }
     catch (e) { u.lang = "en-GB"; }
     u.rate = rate;
-    u.pitch = usePitch && chunk.v === 1 ? 1.12 : 1;
+    u.pitch = usePitch && chunk.v === 1 ? (IS_APPLE ? 1.09 : 1.12) : 1;
     u.volume = 1;
     var done = false;
     var advance = function () {
@@ -5763,7 +5781,7 @@ function paintVoicePicker() {
   if (notice) {
     var bad = !rec && window.speechSynthesis && (function () {
       var l = englishVoices();
-      return !l.length || voiceQuality(l[0]) < 2;
+      return !l.length || voiceQuality(l[0]) < 3;   /* ninguna voz de calidad alta */
     })();
     notice.classList.toggle("hidden", !bad);
     if (bad) notice.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-1"></i> ' + voiceQualityWarning();

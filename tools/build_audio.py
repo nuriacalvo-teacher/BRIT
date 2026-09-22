@@ -42,9 +42,17 @@ ROOT = os.path.dirname(HERE)
 INDEX = os.path.join(ROOT, "index.html")
 AUDIO_DIR = os.path.join(ROOT, "audio")
 
-# Cuatro voces britanicas: dos femeninas y dos masculinas. El dialogo siempre
-# usa una voz del grupo "0" y otra del grupo "1", asi que nunca coinciden.
-VOICES = {
+# Voces britanicas disponibles, por genero. Dentro de una misma unidad cada
+# interlocutor recibe una voz distinta: hay un dialogo a tres (un presentador
+# y dos invitados) en el que dos personajes comparten papel, y con solo dos
+# voces sonarian iguales.
+VOICE_POOL = {
+    "f": ["en-GB-SoniaNeural", "en-GB-LibbyNeural", "en-GB-MaisieNeural"],
+    "m": ["en-GB-RyanNeural", "en-GB-ThomasNeural"],
+}
+# Voz preferida segun el papel: 0 = quien conduce (presentador, profesor,
+# recepcionista...), 1 = quien responde (el invitado, el alumno...).
+PREFERRED_VOICE = {
     (0, "f"): "en-GB-SoniaNeural",
     (0, "m"): "en-GB-RyanNeural",
     (1, "f"): "en-GB-LibbyNeural",
@@ -232,6 +240,24 @@ def gender_for(speaker, v, unit_id):
     return "f" if int(digest[:8], 16) % 2 else "m"
 
 
+def assign_voices(unit_id, lines):
+    """Una voz distinta por interlocutor dentro de la misma unidad."""
+    used, mapping = set(), {}
+    for speaker, v, _ in lines:
+        if speaker in mapping:
+            continue
+        gender = gender_for(speaker, v, unit_id)
+        pick = PREFERRED_VOICE[(1 if v else 0, gender)]
+        if pick in used:                                   # ya la usa otro
+            free = [x for x in VOICE_POOL[gender] if x not in used]
+            if not free:                                   # sin voces de ese genero
+                free = [x for x in VOICE_POOL["f"] + VOICE_POOL["m"] if x not in used]
+            pick = free[0] if free else pick
+        mapping[speaker] = pick
+        used.add(pick)
+    return mapping
+
+
 # ---------------------------------------------------------------------------
 # 2 · MP3 sin dependencias externas: duracion y silencio
 # ---------------------------------------------------------------------------
@@ -326,10 +352,10 @@ async def build_unit(unit_id, lines, force, existing):
         return existing
 
     pieces, cues, elapsed, rate = [], [], 0.0, 24000
+    voices = assign_voices(unit_id, lines)
     prev_speaker = None
     for speaker, v, text in lines:
-        voice = VOICES[(1 if v else 0, gender_for(speaker, v, unit_id))]
-        audio = await synth(text, voice)
+        audio = await synth(text, voices[speaker])
         seconds, rate = mp3_info(audio)
         if prev_speaker is not None:
             gap = silence_mp3(TURN_GAP, rate)

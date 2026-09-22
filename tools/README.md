@@ -21,6 +21,22 @@ La aplicación puede leer los diálogos de dos maneras:
 
 ## Cómo generar el audio grabado
 
+### Opción A · desde la web de GitHub, sin instalar nada (recomendada)
+
+1. Entra en la pestaña **Actions** del repositorio.
+2. En la lista de la izquierda, elige **Grabar los audios de Listening**.
+3. Botón **Run workflow** → **Run workflow**.
+
+Tarda entre 20 y 40 minutos y puedes cerrar la pestaña: sigue corriendo en los
+servidores de GitHub. Cuando termina, los audios ya están subidos al
+repositorio y la aplicación los usa sola.
+
+> Si el paso final falla con un error de permisos, entra en
+> **Settings → Actions → General → Workflow permissions** y marca
+> **Read and write permissions**. Es un ajuste que solo hay que tocar una vez.
+
+### Opción B · desde tu ordenador
+
 Hace falta Python 3 y conexión a internet. Desde la carpeta del proyecto:
 
 ```bash
@@ -28,14 +44,19 @@ pip install edge-tts
 python3 tools/build_audio.py
 ```
 
-Tarda unos minutos (son 60 audios, unos 80 minutos de voz en total) y deja
-en `audio/` un `.mp3` por unidad más un `manifest.json`.
+Deja en `audio/` un `.mp3` por unidad más un `manifest.json`, que hay que subir
+al repositorio (`git add audio && git commit -m "Audios" && git push`).
+
+### En ambos casos
 
 **No hay que tocar `index.html`.** La aplicación busca `audio/manifest.json` al
 arrancar: si existe usa las grabaciones, y si no existe sigue usando la voz del
-navegador. Basta con subir la carpeta `audio/` junto al `index.html`.
+navegador.
 
-### Opciones
+Son 60 audios, unos 80 minutos de voz y unos 25 MB en total. Si el proceso se
+interrumpe a medias se puede volver a lanzar: continúa por donde iba.
+
+### Opciones de la línea de órdenes
 
 ```bash
 python3 tools/build_audio.py --list-voices          # ver las voces británicas disponibles
@@ -43,7 +64,8 @@ python3 tools/build_audio.py --only listening_b1_t1 # regrabar una sola unidad
 python3 tools/build_audio.py --force                # regrabar todo desde cero
 ```
 
-Si se interrumpe a medias, se puede volver a lanzar: continúa por donde iba.
+En la Opción A esas mismas opciones aparecen como casillas al pulsar
+**Run workflow**.
 
 ### Si cambias el texto de un diálogo
 
@@ -55,17 +77,23 @@ python3 tools/build_audio.py --only listening_b2_t14 --force
 
 ## Voces
 
-Se usan cuatro voces neuronales británicas, dos por interlocutor para que no se
-confundan:
+Se usan voces neuronales británicas, y **cada interlocutor de una misma unidad
+recibe una voz distinta** para que no se confundan:
 
-| Interlocutor | Voz femenina | Voz masculina |
+| | Voces femeninas | Voces masculinas |
 |---|---|---|
-| El del papel "0" (presentador, profesor, recepcionista…) | `en-GB-SoniaNeural` | `en-GB-RyanNeural` |
-| El del papel "1" (el invitado, el alumno…) | `en-GB-LibbyNeural` | `en-GB-ThomasNeural` |
+| Disponibles | `en-GB-SoniaNeural`, `en-GB-LibbyNeural`, `en-GB-MaisieNeural` | `en-GB-RyanNeural`, `en-GB-ThomasNeural` |
+| Preferida para quien conduce (presentador, profesor, recepcionista…) | `Sonia` | `Ryan` |
+| Preferida para quien responde (el invitado, el alumno…) | `Libby` | `Thomas` |
+
+Si en una unidad dos personajes comparten papel —pasa en `listening_b2_t2`, que
+tiene un presentador y dos invitados— el segundo recibe la siguiente voz libre
+de su mismo género, nunca la que ya está en uso.
 
 El género se deduce del nombre del personaje (las listas `FEMALE` y `MALE` están
 al principio de `build_audio.py`, se pueden editar). Los papeles genéricos sin
-nombre propio se reparten solos de forma estable.
+nombre propio se reparten solos de forma estable: el mismo papel en la misma
+unidad sale siempre con la misma voz.
 
 ## Qué hacer si no se puede generar el audio
 
