@@ -372,6 +372,49 @@ async def build_unit(unit_id, lines, force, existing):
     return {"f": unit_id + ".mp3", "d": round(elapsed, 2), "cues": cues}
 
 
+async def build_demo():
+    """Muestra corta con las cuatro voces, para oirlas antes de grabar las 60
+    unidades. Usa frases reales del material y el mismo reparto de voces que
+    la grabacion de verdad, asi que lo que se oye aqui es lo que va a salir."""
+    wanted = ["en-GB-SoniaNeural", "en-GB-RyanNeural",
+              "en-GB-LibbyNeural", "en-GB-ThomasNeural"]
+    chosen = {}
+    for unit_id, lines in listening_units():
+        voices = assign_voices(unit_id, lines)
+        for speaker, v, text in lines:
+            voice = voices[speaker]
+            if voice in wanted and voice not in chosen and 12 <= len(text.split()) <= 38:
+                chosen[voice] = (speaker, text)
+        if len(chosen) == len(wanted):
+            break
+
+    if not os.path.isdir(AUDIO_DIR):
+        os.makedirs(AUDIO_DIR)
+
+    pieces, rate = [], 24000
+    print("Grabando una muestra con las cuatro voces...\n")
+    for voice in wanted:
+        if voice not in chosen:
+            continue
+        speaker, text = chosen[voice]
+        print("  %-22s (%s)" % (voice.replace("en-GB-", "").replace("Neural", ""), speaker))
+        print("    \"%s\"" % (text[:76] + ("..." if len(text) > 76 else "")))
+        audio = await synth(text, voice)
+        rate = mp3_info(audio)[1]
+        if pieces:
+            pieces.append(silence_mp3(0.8, rate))
+        pieces.append(audio)
+
+    out = os.path.join(AUDIO_DIR, "muestra-voces.mp3")
+    with open(out, "wb") as fh:
+        fh.write(b"".join(pieces))
+    seconds = mp3_info(b"".join(pieces))[0]
+    print("\nMuestra lista: %s  (%d segundos)" % (out, round(seconds)))
+    print("Escuchala. Si te convence, graba las 60 unidades; si no, no has")
+    print("perdido nada: este fichero no afecta a la aplicacion.")
+    return 0
+
+
 async def main_async(args):
     if args.list_voices:
         import edge_tts
@@ -379,6 +422,9 @@ async def main_async(args):
             if v["Locale"].startswith("en-GB") or v["Locale"].startswith("en-IE"):
                 print("%-28s %-8s %s" % (v["ShortName"], v["Gender"], v["Locale"]))
         return 0
+
+    if args.demo:
+        return await build_demo()
 
     if not os.path.isdir(AUDIO_DIR):
         os.makedirs(AUDIO_DIR)
@@ -429,6 +475,8 @@ def main():
     ap.add_argument("--only", nargs="+", metavar="UNIDAD",
                     help="graba solo estas unidades (p. ej. listening_b1_t1)")
     ap.add_argument("--force", action="store_true", help="regraba aunque el fichero ya exista")
+    ap.add_argument("--demo", action="store_true",
+                    help="graba solo una muestra corta con las cuatro voces, para oirlas")
     ap.add_argument("--list-voices", action="store_true", help="muestra las voces britanicas disponibles")
     ap.add_argument("--stop-on-error", action="store_true", help="para en el primer fallo")
     args = ap.parse_args()

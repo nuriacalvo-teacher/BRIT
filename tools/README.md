@@ -19,6 +19,27 @@ La aplicación puede leer los diálogos de dos maneras:
    oyen exactamente lo mismo**, en cualquier móvil, tablet u ordenador. Es la
    opción recomendada para usarlo en clase, sobre todo con los equipos Linux.
 
+## Primero: oye las voces
+
+Antes de grabar media hora de audio, escucha 30 segundos de muestra. Son
+frases reales del material, con las mismas cuatro voces y el mismo reparto que
+tendría la grabación de verdad.
+
+- **En el Mac:** doble clic en `tools/ESCUCHAR-VOCES.command`. Tarda un minuto
+  y abre el resultado en el reproductor.
+- **Online:** pestaña **Actions** → *Grabar los audios de Listening* →
+  **Run workflow**, marcando la casilla **muestra**. Al terminar, descarga
+  *muestra-de-voces* desde la propia página de la ejecución.
+- **Sin nada de esto:** son voces neuronales de Azure, las mismas que usa
+  **Microsoft Edge** en su función *Leer en voz alta*. Abre Edge en cualquier
+  página, clic derecho → *Leer en voz alta* → opciones de voz → elige
+  **Sonia** o **Ryan** (Reino Unido). Eso es exactamente lo que vas a obtener.
+
+La muestra no toca la aplicación ni el manifest: si no te convence, no has
+perdido nada.
+
+## Cómo generar el audio grabado
+
 ## Cómo generar el audio grabado
 
 ### Opción A · en el Mac, con doble clic (la más fiable)
