@@ -1,0 +1,22 @@
+# Voces que se usan para grabar los audios de Listening.
+#
+# Para cambiarlas:
+#   1. Haz doble clic en COMPARAR-VOCES.command y escucha la comparativa.
+#   2. Apunta las que mas te gusten.
+#   3. Escribe aqui sus nombres completos (por ejemplo en-GB-SoniaNeural).
+#   4. Haz doble clic en GRABAR-AUDIOS.command. Si ya habias grabado, borra
+#      antes la carpeta audio/ o usa la opcion --force.
+#
+# En cada dialogo hay dos papeles: quien conduce (presentador, profesor,
+# recepcionista, entrevistador...) y quien responde (el invitado, el alumno...).
+# De cada papel se usa la voz masculina o la femenina segun el personaje.
+
+mujer_conduce   = en-GB-SoniaNeural
+hombre_conduce  = en-GB-RyanNeural
+mujer_responde  = en-GB-LibbyNeural
+hombre_responde = en-GB-ThomasNeural
+
+# Voz de reserva, solo para el unico dialogo que tiene tres personajes.
+# Dejalo vacio si no quieres una tercera.
+reserva_mujer   = en-GB-MaisieNeural
+reserva_hombre  =

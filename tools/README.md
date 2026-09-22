@@ -19,26 +19,62 @@ La aplicación puede leer los diálogos de dos maneras:
    oyen exactamente lo mismo**, en cualquier móvil, tablet u ordenador. Es la
    opción recomendada para usarlo en clase, sobre todo con los equipos Linux.
 
-## Primero: oye las voces
+## Primero: elige las voces y óyelas
 
-Antes de grabar media hora de audio, escucha 30 segundos de muestra. Son
-frases reales del material, con las mismas cuatro voces y el mismo reparto que
-tendría la grabación de verdad.
+No grabes media hora de audio sin haber escuchado antes cómo va a sonar.
 
-- **En el Mac:** doble clic en `tools/ESCUCHAR-VOCES.command`. Tarda un minuto
-  y abre el resultado en el reproductor.
+### Comparar todas las voces disponibles
+
+- **En el Mac:** doble clic en `tools/COMPARAR-VOCES.command`.
 - **Online:** pestaña **Actions** → *Grabar los audios de Listening* →
-  **Run workflow**, marcando la casilla **muestra**. Al terminar, descarga
-  *muestra-de-voces* desde la propia página de la ejecución.
-- **Sin nada de esto:** son voces neuronales de Azure, las mismas que usa
-  **Microsoft Edge** en su función *Leer en voz alta*. Abre Edge en cualquier
-  página, clic derecho → *Leer en voz alta* → opciones de voz → elige
-  **Sonia** o **Ryan** (Reino Unido). Eso es exactamente lo que vas a obtener.
+  **Run workflow**, marcando **comparativa**. Al terminar, descarga
+  *voces-para-escuchar* desde la página de la ejecución.
 
-La muestra no toca la aplicación ni el manifest: si no te convence, no has
-perdido nada.
+Genera un MP3 en el que **todas** las voces británicas e irlandesas
+disponibles leen la misma frase, cada una diciendo antes su nombre. Dura
+un par de minutos. Escúchalo y apunta las que más te gusten.
 
-## Cómo generar el audio grabado
+### Escribir tu elección
+
+Abre `tools/voces.txt` y pon ahí los nombres completos:
+
+```
+mujer_conduce   = en-GB-SoniaNeural
+hombre_conduce  = en-GB-RyanNeural
+mujer_responde  = en-GB-LibbyNeural
+hombre_responde = en-GB-ThomasNeural
+```
+
+En cada diálogo hay dos papeles —quien conduce (presentador, profesor,
+recepcionista…) y quien responde (el invitado, el alumno…)— y de cada papel se
+usa la voz masculina o la femenina según el personaje. Si te equivocas
+escribiendo un nombre, el programa te avisa antes de grabar y te lista las
+válidas.
+
+### Oír tu elección sobre el material real
+
+- **En el Mac:** doble clic en `tools/ESCUCHAR-VOCES.command`.
+- **Online:** **Run workflow** marcando **muestra**.
+
+Son unos 30 segundos con frases reales de tus diálogos y el mismo reparto de
+voces que tendría la grabación definitiva. No toca la aplicación ni el
+manifest: si no convence, no has perdido nada.
+
+### Si ninguna te parece suficiente
+
+Las voces de `edge-tts` son gratuitas y no necesitan cuenta, pero no son las
+mejores que existen. Si después de la comparativa ninguna te vale, hay motores
+mejores, todos con cuenta y con clave:
+
+| Motor | Coste aproximado para los 60 audios | Cuenta |
+|---|---|---|
+| Azure Speech (directo) | gratis — la capa gratuita cubre de sobra estos ~66.000 caracteres | Azure |
+| Google Cloud TTS (voces Studio / Chirp) | entre 2 y 11 € una vez | Google Cloud |
+| ElevenLabs | unos 22 € un mes | ElevenLabs |
+
+`build_audio.py` está escrito con la síntesis aislada en una sola función
+(`synth`), así que cambiar de motor es acotado. Si te decides por alguno,
+díselo a quien lleve el mantenimiento del proyecto.
 
 ## Cómo generar el audio grabado
 
