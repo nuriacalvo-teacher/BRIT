@@ -5325,8 +5325,17 @@ function allVoices() {
    así que se identifican por voiceURI, no por nombre. */
 function voiceKey(v) { return (v && (v.voiceURI || (v.name + "|" + v.lang))) || ""; }
 
-/* Voces de broma de macOS/iOS: suenan a robot de dibujos animados */
-var NOVELTY_VOICE = /\b(bad news|good news|bahh|bells|boing|bubbles|cellos|deranged|jester|organ|princess|trinoids|whisper|zarvox|wobble|superstar|hysterical|albert|junior|kathy|ralph|rocko|shelley|grandma|grandpa|eddy|flo|sandy|reed|fred)\b/i;
+/* Voces de broma de macOS/iOS: suenan a robot de dibujos animados.
+   OJO: Apple TRADUCE el nombre de estas voces, así que en un sistema en
+   español "Jester" aparece como "Bufón" y "Bubbles" como "Burbujas". Lo que
+   no se traduce nunca es el identificador interno (voiceURI), por eso se
+   comprueban los dos. Buscar solo por el nombre en inglés no filtraba nada
+   fuera de los sistemas en inglés. */
+var NOVELTY_VOICE = /\b(bad ?news|good ?news|bahh|bells|boing|bubbles|cellos|deranged|jester|pipe ?organ|organ|princess|trinoids|whisper|zarvox|wobble|superstar|hysterical|albert|junior|kathy|ralph|bruce|rocko|shelley|grandma|grandpa|eddy|flo|sandy|reed|fred|bufón|bufon|burbujas|campanas|violonchelos|trastornad[oa]|histéric[oa]|histeric[oa]|órgano|organo|princesa|susurro|bamboleo|superestrella|abuel[oa]|malas ?noticias|buenas ?noticias)\b/i;
+function isNoveltyVoice(v) {
+  if (!v) return false;
+  return NOVELTY_VOICE.test(v.name || "") || NOVELTY_VOICE.test(v.voiceURI || "");
+}
 
 /* Nivel de calidad del motor. Es lo que de verdad decide si suena a
    persona o a lata: premium/mejorada/neural frente a compacta. */
@@ -5339,7 +5348,7 @@ function voiceQuality(v) {
   return 2;                                                     /* correcta, pero mejorable */
 }
 function qualityLabel(v) {
-  if (NOVELTY_VOICE.test(v.name || "")) return "de broma";
+  if (isNoveltyVoice(v)) return "de broma";
   var q = voiceQuality(v);
   return q === 3 ? "alta" : (q === 0 ? "baja" : "normal");
 }
@@ -5352,7 +5361,7 @@ function voiceScore(v) {
   /* 1 · calidad del motor (lo que más se nota) */
   var q = voiceQuality(v);
   s += (q === 3 ? 90 : q === 0 ? -70 : 0);
-  if (NOVELTY_VOICE.test(name)) s -= 300;
+  if (isNoveltyVoice(v)) s -= 300;
 
   /* 2 · fabricante */
   if (/google/i.test(both)) s += 40;
@@ -5381,7 +5390,7 @@ function englishVoices() {
   /* macOS y iOS traen de serie un montón de voces de broma (Zarvox, Bubbles,
      Bad News...). No se ocultan por gusto: llenan la lista y hacen creer que
      el dispositivo no tiene nada decente. Solo se muestran si no hay otra. */
-  var usable = all.filter(function (v) { return !NOVELTY_VOICE.test(v.name || ""); });
+  var usable = all.filter(function (v) { return !isNoveltyVoice(v); });
   return (usable.length ? usable : all)
     .sort(function (a, b) { return voiceScore(b) - voiceScore(a); });
 }
@@ -5760,16 +5769,23 @@ function paintVoicePicker() {
 
   if (sel) {
     var list = englishVoices();
-    var chosen = storedVoiceKey() || (list[0] && voiceKey(list[0])) || "";
+    var want = storedVoiceKey();
+    /* si la voz guardada ya no existe (o era una de broma) se vuelve sola
+       a la automática, en vez de quedarse pillada para siempre */
+    var found = want && list.some(function (v) { return voiceKey(v) === want; });
+    var auto = '<option value=""' + (found ? "" : " selected") + '>✨ Automática' +
+               (list.length ? " — " + escapeHtml(list[0].name.replace(/^(Microsoft|Google)\s+/i, "")) : "") +
+               "</option>";
     sel.innerHTML = list.length
-      ? list.map(function (v) {
+      ? auto + list.map(function (v) {
           var lang = (v.lang || "").replace("_", "-");
           var tag = /^en-GB/i.test(lang) ? "🇬🇧" : (/^en-US/i.test(lang) ? "🇺🇸" : "🌍");
           var label = v.name.replace(/^(Microsoft|Google)\s+/i, "");
-          return '<option value="' + escapeHtml(voiceKey(v)) + '"' + (voiceKey(v) === chosen ? " selected" : "") + '>' +
+          return '<option value="' + escapeHtml(voiceKey(v)) + '"' + (found && voiceKey(v) === want ? " selected" : "") + '>' +
             tag + " " + escapeHtml(label) + " · calidad " + qualityLabel(v) + "</option>";
         }).join("")
       : '<option value="">(este dispositivo no tiene voces en inglés)</option>';
+    if (want && !found) storageDel("cova_voice");
   }
   if (warn) {
     var msg = voiceQualityWarning();
