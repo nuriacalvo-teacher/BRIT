@@ -11,6 +11,16 @@ name: Grabar los audios de Listening
 on:
   workflow_dispatch:
     inputs:
+      muestra:
+        description: 'Solo una muestra de 30 s con las cuatro voces elegidas'
+        type: boolean
+        required: false
+        default: false
+      comparativa:
+        description: 'Solo una comparativa con TODAS las voces britanicas, para elegir'
+        type: boolean
+        required: false
+        default: false
       only:
         description: 'Solo estas unidades (opcional). Ej: listening_b1_t1 listening_b2_t7'
         required: false
@@ -44,7 +54,27 @@ jobs:
       - name: Instalar edge-tts
         run: python -m pip install --upgrade pip edge-tts
 
+      - name: Grabar una muestra de las voces elegidas
+        if: ${{ inputs.muestra && !inputs.comparativa }}
+        run: python3 tools/build_audio.py --demo
+
+      - name: Grabar la comparativa de todas las voces
+        if: ${{ inputs.comparativa }}
+        run: python3 tools/build_audio.py --audition
+
+      - name: Dejar el audio listo para descargar
+        if: ${{ inputs.muestra || inputs.comparativa }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: voces-para-escuchar
+          path: |
+            audio/muestra-voces.mp3
+            audio/comparativa-voces.mp3
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Grabar los audios
+        if: ${{ !inputs.muestra && !inputs.comparativa }}
         env:
           ONLY: ${{ inputs.only }}
           FORCE: ${{ inputs.force }}
@@ -61,6 +91,7 @@ jobs:
           python3 tools/build_audio.py "${ARGS[@]}"
 
       - name: Subir los audios al repositorio
+        if: ${{ !inputs.muestra && !inputs.comparativa }}
         run: |
           set -euo pipefail
           git config user.name  'github-actions[bot]'
@@ -74,7 +105,7 @@ jobs:
           git push
 
       - name: Resumen
-        if: always()
+        if: ${{ always() && !inputs.muestra && !inputs.comparativa }}
         run: |
           if [ -f audio/manifest.json ]; then
             python3 -c "import json; d=json.load(open('audio/manifest.json'))['files']; t=sum(f['d'] for f in d.values()); print('## Audios de Listening\\n\\n- Audios grabados: **%d**\\n- Duracion total: **%d min %02d s**' % (len(d), t//60, t%60))" >> "$GITHUB_STEP_SUMMARY"

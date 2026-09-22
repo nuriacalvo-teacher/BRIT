@@ -19,61 +19,123 @@ La aplicación puede leer los diálogos de dos maneras:
    oyen exactamente lo mismo**, en cualquier móvil, tablet u ordenador. Es la
    opción recomendada para usarlo en clase, sobre todo con los equipos Linux.
 
-## Cómo generar el audio grabado
+## Primero: elige las voces y óyelas
 
-### Opción A · desde la web de GitHub, sin instalar nada (recomendada)
+No grabes media hora de audio sin haber escuchado antes cómo va a sonar.
 
-1. Entra en la pestaña **Actions** del repositorio.
-2. En la lista de la izquierda, elige **Grabar los audios de Listening**.
-3. Botón **Run workflow** → **Run workflow**.
+### Comparar todas las voces disponibles
 
-Tarda entre 20 y 40 minutos y puedes cerrar la pestaña: sigue corriendo en los
-servidores de GitHub. Cuando termina, los audios ya están subidos al
-repositorio y la aplicación los usa sola.
+- **En el Mac:** doble clic en `tools/COMPARAR-VOCES.command`.
+- **Online:** pestaña **Actions** → *Grabar los audios de Listening* →
+  **Run workflow**, marcando **comparativa**. Al terminar, descarga
+  *voces-para-escuchar* desde la página de la ejecución.
 
-> Si el paso final falla con un error de permisos, entra en
-> **Settings → Actions → General → Workflow permissions** y marca
-> **Read and write permissions**. Es un ajuste que solo hay que tocar una vez.
+Genera un MP3 en el que **todas** las voces británicas e irlandesas
+disponibles leen la misma frase, cada una diciendo antes su nombre. Dura
+un par de minutos. Escúchalo y apunta las que más te gusten.
 
-### Opción B · desde tu ordenador
+### Escribir tu elección
 
-Hace falta Python 3 y conexión a internet. Desde la carpeta del proyecto:
+Abre `tools/voces.txt` y pon ahí los nombres completos:
 
-```bash
-pip install edge-tts
-python3 tools/build_audio.py
+```
+mujer_conduce   = en-GB-SoniaNeural
+hombre_conduce  = en-GB-RyanNeural
+mujer_responde  = en-GB-LibbyNeural
+hombre_responde = en-GB-ThomasNeural
 ```
 
-Deja en `audio/` un `.mp3` por unidad más un `manifest.json`, que hay que subir
-al repositorio (`git add audio && git commit -m "Audios" && git push`).
+En cada diálogo hay dos papeles —quien conduce (presentador, profesor,
+recepcionista…) y quien responde (el invitado, el alumno…)— y de cada papel se
+usa la voz masculina o la femenina según el personaje. Si te equivocas
+escribiendo un nombre, el programa te avisa antes de grabar y te lista las
+válidas.
 
-### En ambos casos
+### Oír tu elección sobre el material real
+
+- **En el Mac:** doble clic en `tools/ESCUCHAR-VOCES.command`.
+- **Online:** **Run workflow** marcando **muestra**.
+
+Son unos 30 segundos con frases reales de tus diálogos y el mismo reparto de
+voces que tendría la grabación definitiva. No toca la aplicación ni el
+manifest: si no convence, no has perdido nada.
+
+### Si ninguna te parece suficiente
+
+Las voces de `edge-tts` son gratuitas y no necesitan cuenta, pero no son las
+mejores que existen. Si después de la comparativa ninguna te vale, hay motores
+mejores, todos con cuenta y con clave:
+
+| Motor | Coste aproximado para los 60 audios | Cuenta |
+|---|---|---|
+| Azure Speech (directo) | gratis — la capa gratuita cubre de sobra estos ~66.000 caracteres | Azure |
+| Google Cloud TTS (voces Studio / Chirp) | entre 2 y 11 € una vez | Google Cloud |
+| ElevenLabs | unos 22 € un mes | ElevenLabs |
+
+`build_audio.py` está escrito con la síntesis aislada en una sola función
+(`synth`), así que cambiar de motor es acotado. Si te decides por alguno,
+díselo a quien lleve el mantenimiento del proyecto.
+
+## Cómo generar el audio grabado
+
+### Opción A · en el Mac, con doble clic (la más fiable)
+
+1. Descarga el proyecto: en la página del repositorio, botón verde **Code** →
+   **Download ZIP**. Descomprímelo.
+2. Entra en la carpeta `tools` y haz **doble clic** en
+   **`GRABAR-AUDIOS.command`**.
+3. Se abre una ventana negra y empieza a grabar. Déjala trabajar.
+
+La primera vez puede pedirte instalar las herramientas de desarrollo de macOS:
+acepta, espera, y vuelve a hacer doble clic. Si en vez del ZIP clonaste el
+repositorio con `git`, al terminar sube los audios él solo.
+
+> Si macOS dice que *no se puede abrir porque proviene de un desarrollador no
+> identificado*: clic derecho sobre el archivo → **Abrir** → **Abrir**. Solo la
+> primera vez.
+
+### Opción B · online, sin instalar nada
+
+1. Pestaña **Actions** del repositorio.
+2. **Grabar los audios de Listening** en la lista de la izquierda.
+3. **Run workflow** → **Run workflow**.
+
+Corre en los servidores de GitHub y sube los audios él solo. Puedes cerrar la
+pestaña. Es la opción más cómoda, pero el servicio de voz rechaza a veces las
+peticiones que vienen de centros de datos; si falla con un error de permisos o
+de conexión, usa la Opción A, que sale desde tu propia red.
+
+> Si falla al subir los audios: **Settings → Actions → General → Workflow
+> permissions → Read and write permissions**. Se toca una sola vez.
+
+### Opción C · a mano, desde el terminal
+
+```bash
+python3 -m venv .venv-audio
+.venv-audio/bin/pip install edge-tts
+.venv-audio/bin/python tools/build_audio.py
+git add audio && git commit -m "Audios de Listening" && git push
+```
+
+### En los tres casos
 
 **No hay que tocar `index.html`.** La aplicación busca `audio/manifest.json` al
 arrancar: si existe usa las grabaciones, y si no existe sigue usando la voz del
 navegador.
 
-Son 60 audios, unos 80 minutos de voz y unos 25 MB en total. Si el proceso se
-interrumpe a medias se puede volver a lanzar: continúa por donde iba.
+Son 60 audios, unos 80 minutos de voz y unos 25 MB. Tarda alrededor de media
+hora. Si se interrumpe se puede relanzar: continúa por donde iba.
 
-### Opciones de la línea de órdenes
+### Regrabar una unidad concreta
+
+Si cambias el texto de un diálogo:
 
 ```bash
-python3 tools/build_audio.py --list-voices          # ver las voces británicas disponibles
-python3 tools/build_audio.py --only listening_b1_t1 # regrabar una sola unidad
-python3 tools/build_audio.py --force                # regrabar todo desde cero
+.venv-audio/bin/python tools/build_audio.py --only listening_b2_t14 --force
 ```
 
-En la Opción A esas mismas opciones aparecen como casillas al pulsar
+En la Opción B esas mismas opciones aparecen como casillas al pulsar
 **Run workflow**.
-
-### Si cambias el texto de un diálogo
-
-Regraba solo esa unidad:
-
-```bash
-python3 tools/build_audio.py --only listening_b2_t14 --force
-```
 
 ## Voces
 

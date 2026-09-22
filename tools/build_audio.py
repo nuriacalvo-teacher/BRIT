@@ -50,6 +50,11 @@ VOICE_POOL = {
     "f": ["en-GB-SoniaNeural", "en-GB-LibbyNeural", "en-GB-MaisieNeural"],
     "m": ["en-GB-RyanNeural", "en-GB-ThomasNeural"],
 }
+VOICES_FILE = os.path.join(HERE, "voces.txt")
+CONFIG_KEYS = [
+    ("mujer_conduce", 0, "f"), ("hombre_conduce", 0, "m"),
+    ("mujer_responde", 1, "f"), ("hombre_responde", 1, "m"),
+]
 # Voz preferida segun el papel: 0 = quien conduce (presentador, profesor,
 # recepcionista...), 1 = quien responde (el invitado, el alumno...).
 PREFERRED_VOICE = {
@@ -70,6 +75,34 @@ MALE = {
     "alberto", "diego", "iván", "ivan", "martín", "martin", "mr espín",
     "mr espin", "rubén", "ruben", "sergio", "tomás", "tomas",
 }
+
+def load_voice_config():
+    """Lee tools/voces.txt, si existe, y sustituye las voces por defecto.
+    Asi se pueden cambiar sin tocar el codigo."""
+    if not os.path.exists(VOICES_FILE):
+        return
+    values = {}
+    for line in io.open(VOICES_FILE, encoding="utf-8"):
+        line = line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        values[key.strip().lower()] = val.strip()
+
+    for key, role, gender in CONFIG_KEYS:
+        if values.get(key):
+            PREFERRED_VOICE[(role, gender)] = values[key]
+    for gender, key in (("f", "reserva_mujer"), ("m", "reserva_hombre")):
+        pool = [PREFERRED_VOICE[(0, gender)], PREFERRED_VOICE[(1, gender)]]
+        if values.get(key):
+            pool.append(values[key])
+        seen, clean = set(), []
+        for v in pool:
+            if v and v not in seen:
+                seen.add(v)
+                clean.append(v)
+        VOICE_POOL[gender] = clean
+
 
 TURN_GAP = 0.65        # segundos de silencio al cambiar de interlocutor
 SENTENCE_GAP = 0.0     # edge-tts ya deja su propia pausa al final de cada frase
@@ -372,6 +405,120 @@ async def build_unit(unit_id, lines, force, existing):
     return {"f": unit_id + ".mp3", "d": round(elapsed, 2), "cues": cues}
 
 
+async def build_demo():
+    """Muestra corta con las cuatro voces, para oirlas antes de grabar las 60
+    unidades. Usa frases reales del material y el mismo reparto de voces que
+    la grabacion de verdad, asi que lo que se oye aqui es lo que va a salir."""
+    wanted = [PREFERRED_VOICE[(role, gender)] for _, role, gender in CONFIG_KEYS]
+    chosen = {}
+    for unit_id, lines in listening_units():
+        voices = assign_voices(unit_id, lines)
+        for speaker, v, text in lines:
+            voice = voices[speaker]
+            if voice in wanted and voice not in chosen and 12 <= len(text.split()) <= 38:
+                chosen[voice] = (speaker, text)
+        if len(chosen) == len(wanted):
+            break
+
+    if not os.path.isdir(AUDIO_DIR):
+        os.makedirs(AUDIO_DIR)
+
+    pieces, rate = [], 24000
+    print("Grabando una muestra con las cuatro voces...\n")
+    for voice in wanted:
+        if voice not in chosen:
+            continue
+        speaker, text = chosen[voice]
+        short = re.sub(r"^[a-z]{2}-[A-Z]{2}-", "", voice).replace("Neural", "")
+        print("  %-22s %-24s (%s)" % (short, voice, speaker))
+        print("    \"%s\"" % (text[:76] + ("..." if len(text) > 76 else "")))
+        audio = await synth(text, voice)
+        rate = mp3_info(audio)[1]
+        if pieces:
+            pieces.append(silence_mp3(0.8, rate))
+        pieces.append(audio)
+
+    out = os.path.join(AUDIO_DIR, "muestra-voces.mp3")
+    with open(out, "wb") as fh:
+        fh.write(b"".join(pieces))
+    seconds = mp3_info(b"".join(pieces))[0]
+    print("\nMuestra lista: %s  (%d segundos)" % (out, round(seconds)))
+    print("Escuchala. Si te convence, graba las 60 unidades; si no, no has")
+    print("perdido nada: este fichero no afecta a la aplicacion.")
+    return 0
+
+
+SAMPLE_LINE = ("The train now standing at platform four is the delayed service to "
+               "Manchester. We apologise for the inconvenience, and we expect it to "
+               "leave in about twenty minutes.")
+
+
+async def build_audition(locales):
+    """Un solo MP3 con TODAS las voces disponibles leyendo la misma frase, cada
+    una precedida de su propio nombre. Sirve para elegir por oido."""
+    import edge_tts
+    voices = [v for v in await edge_tts.list_voices()
+              if any(v["Locale"].startswith(loc) for loc in locales)]
+    voices.sort(key=lambda v: (v["Locale"], v["Gender"], v["ShortName"]))
+    if not voices:
+        print("No he encontrado ninguna voz para: %s" % ", ".join(locales), file=sys.stderr)
+        return 1
+
+    if not os.path.isdir(AUDIO_DIR):
+        os.makedirs(AUDIO_DIR)
+
+    print("Grabando una comparativa con %d voces...\n" % len(voices))
+    pieces, elapsed, rate = [], 0.0, 24000
+    for v in voices:
+        short = v["ShortName"]
+        label = short.split("-")[-1].replace("Neural", "")
+        stamp = "%d:%02d" % (elapsed // 60, elapsed % 60)
+        print("  %s  %-30s %s" % (stamp, short, v["Gender"]))
+        try:
+            audio = await synth("%s. %s" % (label, SAMPLE_LINE), short)
+        except Exception as exc:                        # noqa: BLE001
+            print("        (fallo: %s)" % exc)
+            continue
+        seconds, rate = mp3_info(audio)
+        if pieces:
+            gap = silence_mp3(0.9, rate)
+            pieces.append(gap)
+            elapsed += mp3_info(gap)[0]
+        pieces.append(audio)
+        elapsed += seconds
+
+    out = os.path.join(AUDIO_DIR, "comparativa-voces.mp3")
+    with open(out, "wb") as fh:
+        fh.write(b"".join(pieces))
+    print("\nComparativa lista: %s  (%d min %02d s)" % (out, elapsed // 60, elapsed % 60))
+    print("\nEscuchala y apunta las que mas te gusten. Despues abre")
+    print("tools/voces.txt y escribe ahi sus nombres completos (la columna")
+    print("del medio, por ejemplo en-GB-SoniaNeural). Luego graba.")
+    return 0
+
+
+async def check_voices(names):
+    """Comprueba contra el catalogo real que las voces configuradas existen.
+    Una errata en tools/voces.txt debe verse antes de grabar, no despues."""
+    import edge_tts
+    try:
+        catalog = {v["ShortName"] for v in await edge_tts.list_voices()}
+    except Exception:                                   # noqa: BLE001
+        return True                                     # sin catalogo, no se bloquea
+    wrong = sorted(set(n for n in names if n and n not in catalog))
+    if not wrong:
+        return True
+    print("\nEstas voces de tools/voces.txt no existen:\n", file=sys.stderr)
+    for n in wrong:
+        print("    %s" % n, file=sys.stderr)
+    british = sorted(v for v in catalog if v.startswith("en-GB") or v.startswith("en-IE"))
+    print("\nDisponibles para ingles britanico e irlandes:\n", file=sys.stderr)
+    for n in british:
+        print("    %s" % n, file=sys.stderr)
+    print("\nCorrige tools/voces.txt y vuelve a intentarlo.", file=sys.stderr)
+    return False
+
+
 async def main_async(args):
     if args.list_voices:
         import edge_tts
@@ -379,6 +526,17 @@ async def main_async(args):
             if v["Locale"].startswith("en-GB") or v["Locale"].startswith("en-IE"):
                 print("%-28s %-8s %s" % (v["ShortName"], v["Gender"], v["Locale"]))
         return 0
+
+    load_voice_config()
+    if os.path.exists(VOICES_FILE) and not args.audition:
+        configured = list(PREFERRED_VOICE.values()) + VOICE_POOL["f"] + VOICE_POOL["m"]
+        if not await check_voices(configured):
+            return 1
+
+    if args.audition:
+        return await build_audition(args.locales)
+    if args.demo:
+        return await build_demo()
 
     if not os.path.isdir(AUDIO_DIR):
         os.makedirs(AUDIO_DIR)
@@ -429,6 +587,12 @@ def main():
     ap.add_argument("--only", nargs="+", metavar="UNIDAD",
                     help="graba solo estas unidades (p. ej. listening_b1_t1)")
     ap.add_argument("--force", action="store_true", help="regraba aunque el fichero ya exista")
+    ap.add_argument("--audition", action="store_true",
+                    help="graba una comparativa con todas las voces disponibles")
+    ap.add_argument("--locales", nargs="+", default=["en-GB", "en-IE"], metavar="LOCALE",
+                    help="acentos a incluir en la comparativa (por defecto en-GB en-IE)")
+    ap.add_argument("--demo", action="store_true",
+                    help="graba solo una muestra corta con las cuatro voces, para oirlas")
     ap.add_argument("--list-voices", action="store_true", help="muestra las voces britanicas disponibles")
     ap.add_argument("--stop-on-error", action="store_true", help="para en el primer fallo")
     args = ap.parse_args()
